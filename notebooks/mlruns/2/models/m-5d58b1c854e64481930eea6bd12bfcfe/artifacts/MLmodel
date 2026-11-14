@@ -1,0 +1,23 @@
+artifact_path: /mnt/WindowsD/Artificial Intelligence/MLOPS/projects/mlops-mini-project/notebooks/mlruns/2/models/m-5d58b1c854e64481930eea6bd12bfcfe/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.skops
+    predict_fn: predict
+    python_version: 3.14.10
+  sklearn:
+    code: null
+    pickled_model: model.skops
+    serialization_format: skops
+    sklearn_version: 1.9.0
+    skops_trusted_types: null
+mlflow_version: 3.18.0
+model_id: m-5d58b1c854e64481930eea6bd12bfcfe
+model_size_bytes: 130715
+model_uuid: m-5d58b1c854e64481930eea6bd12bfcfe
+prompts: null
+run_id: fe2838f18331403395f50da916393061
+utc_time_created: '2026-11-14 06:00:51.091529'
