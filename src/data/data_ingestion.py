@@ -59,6 +59,10 @@ def load_data(data_path: str) -> pd.DataFrame:
             logger.error("Loaded dataframe is empty: %s", data_path)
             raise ValueError("Loaded dataframe is empty")
 
+        logger.debug('Extracting the two classes out of : %s' , df['sentiment'].unique()) 
+
+        df = df[(df['sentiment']=='happiness') | (df['sentiment'] == 'sadness')]
+        logger.debug('Total classes now : %s' , df['sentiment'].unique())
         logger.info("Data loaded successfully. Final shape: %s", df.shape)
         return df
 

@@ -3,12 +3,13 @@ import os
 import pickle
 import sys
 from pathlib import Path
-from typing import Tuple
-from dvclive.live import Live
-import lightgbm as lgb
-import numpy as np
+from typing import Tuple, Union
+
 import pandas as pd
 import yaml
+from dvclive import Live
+from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 
 
 # ---------------- Logging setup ----------------
@@ -40,7 +41,10 @@ logger = setup_logging(logging.DEBUG)
 
 # ---------------- Data functions ----------------
 
-def load_data(x_train_path: str, y_train_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+def load_data(
+    x_train_path: str,
+    y_train_path: str,
+) -> Tuple[pd.DataFrame, pd.Series]:
     """Load transformed training features and labels."""
     logger.debug("Starting training data loading")
     logger.debug("Features path: %s", x_train_path)
@@ -77,13 +81,27 @@ def load_data(x_train_path: str, y_train_path: str) -> Tuple[pd.DataFrame, pd.Se
                 f"{x_train.shape[0]} features vs {y_train.shape[0]} labels"
             )
 
-        # Convert labels to a 1-dimensional Series
         if y_train.shape[1] != 1:
-            logger.error("Label file must contain exactly one column. Found: %s", y_train.shape[1])
+            logger.error(
+                "Label file must contain exactly one column. Found: %s",
+                y_train.shape[1],
+            )
             raise ValueError("Label file must contain exactly one column")
 
         y_train = y_train.iloc[:, 0]
         y_train.name = "sentiment"
+
+        n_classes = y_train.nunique()
+        logger.debug("Number of target classes: %s", n_classes)
+
+        if n_classes < 2:
+            logger.error(
+                "Classification requires at least two classes. Found: %s",
+                n_classes,
+            )
+            raise ValueError(
+                f"Classification requires at least two classes. Found: {n_classes}"
+            )
 
         logger.info("Training data loaded successfully")
         return x_train, y_train
@@ -93,37 +111,67 @@ def load_data(x_train_path: str, y_train_path: str) -> Tuple[pd.DataFrame, pd.Se
         raise
 
 
+# ---------------- Model functions ----------------
+
 def train_model(
     x_train: pd.DataFrame,
     y_train: pd.Series,
-    n_estimators: int,
-    learning_rate: float,
-) -> lgb.LGBMClassifier:
-    """Train a LightGBM classifier."""
+    C: float,
+    solver: str,
+    l1_ratio : float
+) -> Union[LogisticRegression, OneVsRestClassifier]:
+    """Train a logistic-regression classifier."""
     logger.debug("Starting model training")
-    logger.debug("Model parameters - n_estimators: %s, learning_rate: %s", n_estimators, learning_rate)
+    logger.debug(
+        "Model parameters - C: %s, solver: %s",
+        C,
+        solver,
+    )
 
-    if n_estimators <= 0:
-        logger.error("Invalid n_estimators value: %s. It must be greater than 0.", n_estimators)
-        raise ValueError(f"Invalid n_estimators value: {n_estimators}. It must be greater than 0.")
-
-    if learning_rate <= 0:
-        logger.error("Invalid learning_rate value: %s. It must be greater than 0.", learning_rate)
-        raise ValueError(f"Invalid learning_rate value: {learning_rate}. It must be greater than 0.")
-
-    logger.debug("Tracking start of params of lightgbm")
-    with Live(save_dvc_exp=True) as live:
-        live.log_param('n_estimators' , n_estimators)
-        live.log_param('learning_rate' , learning_rate)
-    logger.debug('DVC Tracking Completed')
-
-    try:
-        model = lgb.LGBMClassifier(
-            n_estimators=n_estimators,
-            learning_rate=learning_rate,
+    if C <= 0:
+        logger.error(
+            "Invalid C value: %s. It must be greater than 0.",
+            C,
+        )
+        raise ValueError(
+            f"Invalid C value: {C}. It must be greater than 0."
         )
 
-        logger.debug("Fitting LightGBM classifier")
+    allowed_solvers = {
+        "lbfgs",
+        "liblinear",
+        "newton-cg",
+        "newton-cholesky",
+        "sag",
+        "saga",
+    }
+
+    if solver not in allowed_solvers:
+        logger.error(
+            "Invalid solver: %s. Allowed solvers are: %s",
+            solver,
+            sorted(allowed_solvers),
+        )
+        raise ValueError(
+            f"Invalid solver: {solver}. Allowed solvers are: {sorted(allowed_solvers)}"
+        )
+
+    logger.debug("Logging model parameters to DVCLive")
+
+    with Live(save_dvc_exp=True) as live:
+        live.log_param("C", C)
+        live.log_param("solver", solver)
+
+    logger.debug("DVCLive parameter tracking completed")
+
+    try:
+        model = LogisticRegression(
+            C=C,
+            solver=solver,
+            l1_ratio=l1_ratio
+        )
+
+        logger.debug("Fitting logistic-regression classifier")
         model.fit(x_train, y_train)
 
         logger.info("Model training completed successfully")
@@ -136,7 +184,11 @@ def train_model(
         raise
 
 
-def save_model(model: object, output_path: str, output_dir: str) -> None:
+def save_model(
+    model: object,
+    output_path: str,
+    output_dir: str,
+) -> None:
     """Save the trained model using pickle."""
     logger.debug("Starting model saving process")
     logger.debug("Model output directory: %s", output_dir)
@@ -160,11 +212,14 @@ def save_model(model: object, output_path: str, output_dir: str) -> None:
         raise
 
 
+# ---------------- Pipeline ----------------
+
 def main(
     x_train_path: str,
     y_train_path: str,
-    n_estimators: int,
-    learning_rate: float,
+    C: float,
+    solver: str,
+    l1_ratio :float,
     output_path: str,
     output_dir: str,
 ) -> None:
@@ -180,8 +235,9 @@ def main(
         model = train_model(
             x_train=x_train,
             y_train=y_train,
-            n_estimators=n_estimators,
-            learning_rate=learning_rate,
+            C=C,
+            solver=solver,
+            l1_ratio=l1_ratio
         )
 
         save_model(
@@ -223,14 +279,16 @@ if __name__ == "__main__":
         logger.debug("Loaded YAML configuration: %s", params)
 
         model_params = params["model_building"]
-        n_estimators = model_params["n_estimators"]
-        learning_rate = model_params["learning_rate"]
+        C = model_params["C"]
+        solver = model_params["solver"]
+        l1_ratio = model_params["l1_ratio"]
 
         main(
             x_train_path=str(x_train_path),
             y_train_path=str(y_train_path),
-            n_estimators=n_estimators,
-            learning_rate=learning_rate,
+            C=C,
+            solver=solver,
+            l1_ratio=l1_ratio,
             output_path=str(model_path),
             output_dir=str(model_dir),
         )

@@ -67,7 +67,7 @@ def clean_features(train_path: str, test_path: str) -> Tuple[pd.DataFrame, pd.Da
 
         logger.debug("Transforming 'content' column in train data")
         train["content"] = train["content"].apply(automac.text.transform)
-
+        
         logger.debug("Transforming 'content' column in test data")
         test["content"] = test["content"].apply(automac.text.transform)
         logger.debug('Feature names after transformation: %s' , train.columns)

@@ -38,8 +38,9 @@ stages:
     - model
     - src/models/predict_model.py
     params:
-    - model_building.n_estimators
-    - model_building.learning_rate
+    - model_building.C
+    - model_building.l1_ratio
+    - model_building.solver
     metrics:
     - reports/figures/scores.csv
 metrics:
