@@ -1,0 +1,102 @@
+schema: '2.0'
+stages:
+  data_ingestion:
+    cmd: python src/data/data_ingestion.py
+    deps:
+    - path: src/data/data_ingestion.py
+      hash: md5
+      md5: a57593d6c9c3ff472afd0f53ffd1e63a
+      size: 6458
+      isexec: true
+    params:
+      params.yaml:
+        data_ingestion.test_size: 0.2
+    outs:
+    - path: data/raw
+      hash: md5
+      md5: 90df9cc6d4f18903db3006b5db00f451.dir
+      size: 3517110
+      nfiles: 2
+  data_cleaning:
+    cmd: python src/data/data_cleaning.py
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: 90df9cc6d4f18903db3006b5db00f451.dir
+      size: 3517110
+      nfiles: 2
+    - path: src/data/data_cleaning.py
+      hash: md5
+      md5: f26f5a1f6e7ff3cae736f7243b971d8d
+      size: 5702
+      isexec: true
+    outs:
+    - path: data/processed/
+      hash: md5
+      md5: 88937427b65e7fa977b43a95f64e5ad8.dir
+      size: 2101938
+      nfiles: 2
+  feature_engineering:
+    cmd: python src/data/feature_engineering.py
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 88937427b65e7fa977b43a95f64e5ad8.dir
+      size: 2101938
+      nfiles: 2
+    - path: src/data/feature_engineering.py
+      hash: md5
+      md5: 717c157b014e18bede766c4d17a63692
+      size: 9083
+      isexec: true
+    params:
+      params.yaml:
+        feature_engineering.max_features: 100
+    outs:
+    - path: data/transformed/
+      hash: md5
+      md5: 4b935c38015c532434845154912b4832.dir
+      size: 8089386
+      nfiles: 4
+  model_training:
+    cmd: python src/models/train_model.py
+    deps:
+    - path: data/transformed/
+      hash: md5
+      md5: 4b935c38015c532434845154912b4832.dir
+      size: 8089386
+      nfiles: 4
+    - path: src/models/train_model.py
+      hash: md5
+      md5: f30e821e9de5a56f735d61a892d944f2
+      size: 7995
+      isexec: true
+    outs:
+    - path: model
+      hash: md5
+      md5: e0bce70e56d6c0a8a3af75c779c914bf.dir
+      size: 3709134
+      nfiles: 1
+  model_evaluation:
+    cmd: python src/models/predict_model.py
+    deps:
+    - path: model
+      hash: md5
+      md5: e0bce70e56d6c0a8a3af75c779c914bf.dir
+      size: 3709134
+      nfiles: 1
+    - path: src/models/predict_model.py
+      hash: md5
+      md5: 09cacfc353f073aebfd1e590e721bc17
+      size: 10608
+      isexec: true
+    params:
+      params.yaml:
+        model_building.learning_rate: 0.1
+        model_building.n_estimators: 80
+    outs:
+    - path: reports/figures/scores.csv
+      hash: md5
+      md5: b7c943b88de9323c78bc4c4ae2e8e8ba
+      size: 140
+      isexec: true
