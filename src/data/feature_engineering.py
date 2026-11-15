@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import pickle
 from pathlib import Path
 from typing import Tuple
 from dvclive.live import Live
@@ -144,7 +145,7 @@ def encoding_columns(
         logger.debug("Encoded label classes: %s", list(label_encoder.classes_))
         logger.info("Feature encoding completed successfully")
 
-        return x_train, x_test, y_train, y_test
+        return x_train, x_test, y_train, y_test , cv
 
     except Exception:
         logger.exception("Failed during feature encoding")
@@ -156,6 +157,8 @@ def save_data(
     x_test: pd.DataFrame,
     y_train: pd.Series,
     y_test: pd.Series,
+    cv: object,
+    cv_path : str,
     x_train_path: str,
     x_test_path: str,
     y_train_path: str,
@@ -182,6 +185,22 @@ def save_data(
         y_test.to_csv(y_test_path, index=False)
         logger.info("Testing labels saved successfully: %s", y_test_path)
 
+        vectorizer_path = Path(cv_path).resolve()
+        vectorizer_path.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Saving vectorizer to: %s", vectorizer_path)
+
+        with vectorizer_path.open("wb") as cv_file:
+            pickle.dump(cv, cv_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+        logger.info(
+            "Vectorizer saved successfully: %s (%s bytes)",
+            vectorizer_path,
+            vectorizer_path.stat().st_size,
+        )
+        
+        logger.debug('Storing Vectorizer object at %s' , cv_path)
+
     except Exception:
         logger.exception("Failed to save transformed train/test data")
         raise
@@ -196,6 +215,7 @@ def main(
     y_test_path: str,
     output_dir: str,
     max_features: int,
+    cv_path: str
 ) -> None:
     """Run the complete feature engineering pipeline."""
     logger.info("Starting feature engineering pipeline")
@@ -206,7 +226,7 @@ def main(
             test_path=test_path,
         )
 
-        x_train, x_test, y_train, y_test = encoding_columns(
+        x_train, x_test, y_train, y_test , cv = encoding_columns(
             train=train,
             test=test,
             max_features=max_features,
@@ -222,6 +242,8 @@ def main(
             y_train_path=y_train_path,
             y_test_path=y_test_path,
             output_dir=output_dir,
+            cv=cv,
+            cv_path=cv_path
         )
 
         logger.info("Feature engineering pipeline completed successfully")
@@ -247,9 +269,12 @@ if __name__ == "__main__":
     y_test_path = transformed_dir / "y_test.csv"
 
     yaml_path = home_dir / "params.yaml"
+    cv_path = home_dir / "model" / "vectorizer.pkl"
 
     logger.debug("Project home directory: %s", home_dir)
     logger.debug("YAML configuration path: %s", yaml_path)
+    logger.debug("vectorizer configuration path: %s", cv_path)
+
 
     try:
         with open(yaml_path, "r", encoding="utf-8") as file:
@@ -268,6 +293,7 @@ if __name__ == "__main__":
             y_test_path=str(y_test_path),
             output_dir=str(transformed_dir),
             max_features=max_features,
+            cv_path=str(cv_path)
         )
 
         print("Done")

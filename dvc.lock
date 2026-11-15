@@ -46,8 +46,8 @@ stages:
       nfiles: 2
     - path: src/data/feature_engineering.py
       hash: md5
-      md5: 717c157b014e18bede766c4d17a63692
-      size: 9083
+      md5: 42278e5ece05a16b6d3f8931cd623ea3
+      size: 9902
       isexec: true
     params:
       params.yaml:
