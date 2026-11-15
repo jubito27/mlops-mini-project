@@ -43,6 +43,12 @@ stages:
     - model_building.solver
     metrics:
     - reports/figures/scores.csv
+  model_registration:
+    cmd: python src/models/register_model.py
+    deps:
+    - reports/figures/experiment_info.json
+    - src/models/register_model.py
+
 metrics:
 - dvclive/metrics.json
 plots:

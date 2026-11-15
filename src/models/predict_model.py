@@ -1,12 +1,18 @@
+import json
 import logging
 import os
 import pickle
 import sys
 from pathlib import Path
 from typing import Tuple, Union
-from dvclive.live import Live
+
+import dagshub
+import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
+from dvclive import Live
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -15,6 +21,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sklearn.multiclass import OneVsRestClassifier
 
 
 # ---------------- Logging setup ----------------
@@ -69,7 +76,10 @@ def load_model(model_path: str) -> object:
         raise
 
 
-def load_data(x_test_path: str, y_test_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+def load_data(
+    x_test_path: str,
+    y_test_path: str,
+) -> Tuple[pd.DataFrame, pd.Series]:
     """Load transformed test features and labels."""
     logger.debug("Starting test data loading")
     logger.debug("Test features path: %s", x_test_path)
@@ -107,7 +117,10 @@ def load_data(x_test_path: str, y_test_path: str) -> Tuple[pd.DataFrame, pd.Seri
             )
 
         if y_test.shape[1] != 1:
-            logger.error("Label file must contain exactly one column. Found: %s", y_test.shape[1])
+            logger.error(
+                "Label file must contain exactly one column. Found: %s",
+                y_test.shape[1],
+            )
             raise ValueError("Label file must contain exactly one column")
 
         y_test = y_test.iloc[:, 0]
@@ -140,19 +153,22 @@ def calculate_scores(
         y_pred = model.predict(x_test)
 
         accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred, average="macro", zero_division=0)
-        recall = recall_score(y_test, y_pred, average="macro", zero_division=0)
-        f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
-        logger.debug("Tracking start of metrices")
-        with Live(save_dvc_exp=True) as live:
-            live.log_metric('accuracy' , accuracy)
-            live.log_metric('precision' , precision)
-            live.log_metric('recall' , recall)
-            live.log_metric('f1_score' , f1)
-        logger.debug('DVC Tracking Completed')
-        classification = classification_report(
+        precision = precision_score(
             y_test,
             y_pred,
+            average="macro",
+            zero_division=0,
+        )
+        recall = recall_score(
+            y_test,
+            y_pred,
+            average="macro",
+            zero_division=0,
+        )
+        f1 = f1_score(
+            y_test,
+            y_pred,
+            average="macro",
             zero_division=0,
         )
 
@@ -162,6 +178,22 @@ def calculate_scores(
             precision,
             recall,
             f1,
+        )
+
+        logger.debug("Starting DVCLive metric tracking")
+
+        with Live(save_dvc_exp=True) as live:
+            live.log_metric("accuracy", accuracy)
+            live.log_metric("precision", precision)
+            live.log_metric("recall", recall)
+            live.log_metric("f1_score", f1)
+
+        logger.debug("DVCLive metric tracking completed")
+
+        classification = classification_report(
+            y_test,
+            y_pred,
+            zero_division=0,
         )
 
         y_proba = model.predict_proba(x_test)
@@ -184,27 +216,44 @@ def calculate_scores(
             )
 
         class_aucs = []
+
         for class_label in test_classes:
             class_index = np.flatnonzero(model_classes == class_label)[0]
             y_binary = (y_test == class_label).astype(int)
 
-            class_auc = roc_auc_score(y_binary, y_proba[:, class_index])
+            class_auc = roc_auc_score(
+                y_binary,
+                y_proba[:, class_index],
+            )
+
             class_aucs.append(class_auc)
 
-            logger.debug("ROC AUC for class %s: %s", class_label, class_auc)
+            logger.debug(
+                "ROC AUC for class %s: %s",
+                class_label,
+                class_auc,
+            )
 
         auc = float(np.mean(class_aucs))
         logger.debug("Mean one-vs-rest ROC AUC: %s", auc)
+
+        logger.debug("Logging ROC AUC metric to DVCLive")
+
+        with Live(save_dvc_exp=True) as live:
+            live.log_metric("roc_auc", auc)
 
         scores = {
             "accuracy": accuracy,
             "precision": precision,
             "recall": recall,
-            "f1": f1,
-            "auc": auc,
+            "f1_score": f1,
+            "roc_auc": auc,
         }
 
-        scores_df = pd.DataFrame([scores], index=["lightgbm"]).T
+        scores_df = pd.DataFrame(
+            [scores],
+            index=["logistic_regression"],
+        ).T
 
         logger.info("Model evaluation completed successfully")
         return scores_df, classification
@@ -236,13 +285,80 @@ def save_reports(
         scores_df.to_csv(scores_path, index=True)
         logger.info("Evaluation scores saved successfully: %s", scores_path)
 
-        Path(classification_path).write_text(classification_report_text, encoding="utf-8")
-        logger.info("Classification report saved successfully: %s", classification_path)
+        Path(classification_path).write_text(
+            classification_report_text,
+            encoding="utf-8",
+        )
+        logger.info(
+            "Classification report saved successfully: %s",
+            classification_path,
+        )
 
     except Exception:
         logger.exception("Failed to save evaluation reports")
         raise
 
+
+# ---------------- MLflow helpers ----------------
+
+def log_model_to_mlflow(
+    model: object,
+    x_test: pd.DataFrame,
+    model_name: str,
+) -> str:
+    """Log the trained model to MLflow and return its model URI."""
+    logger.debug("Starting MLflow model logging")
+    logger.debug("Model name: %s", model_name)
+
+    try:
+        model_info = mlflow.sklearn.log_model(
+            sk_model=model,
+            name=model_name,
+            input_example=x_test[:5],
+        )
+
+        model_uri = model_info.model_uri
+
+        logger.debug("Logged model URI: %s", model_uri)
+        logger.info("Model logged successfully to MLflow: %s", model_name)
+
+        return model_uri
+
+    except Exception:
+        logger.exception("Failed to log model to MLflow")
+        raise
+
+
+def save_model_info(
+    run_id: str,
+    model_name: str,
+    model_uri: str,
+    file_path: str,
+) -> None:
+    """Save MLflow run ID, model name, and model URI to a JSON file."""
+    logger.debug("Starting model-info saving process")
+    logger.debug("MLflow run ID: %s", run_id)
+    logger.debug("Model name: %s", model_name)
+    logger.debug("Model URI: %s", model_uri)
+    logger.debug("Model-info output path: %s", file_path)
+
+    try:
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+        model_info = {
+            "run_id": run_id,
+            "model_name": model_name,
+            "model_uri": model_uri,
+        }
+
+        with open(file_path, "w", encoding="utf-8") as file:
+            json.dump(model_info, file, indent=4)
+
+        logger.info("Model info saved successfully: %s", file_path)
+
+    except Exception:
+        logger.exception("Failed to save model info to: %s", file_path)
+        raise
 
 # ---------------- Pipeline ----------------
 
@@ -253,33 +369,106 @@ def main(
     scores_path: str,
     classification_path: str,
     output_dir: str,
+    experiment_info_path: str,
 ) -> None:
     """Run the complete model-evaluation pipeline."""
     logger.info("Starting model-evaluation pipeline")
 
     try:
-        model = load_model(model_path=model_path)
+        logger.debug("Initializing DagsHub and MLflow")
 
-        x_test, y_test = load_data(
-            x_test_path=x_test_path,
-            y_test_path=y_test_path,
+        dagshub.init(
+            repo_owner="jubito27",
+            repo_name="mlops-mini-project",
+            mlflow=True,
         )
 
-        scores_df, classification_report_text = calculate_scores(
-            model=model,
-            x_test=x_test,
-            y_test=y_test,
+        mlflow.set_tracking_uri(
+            "https://dagshub.com/jubito27/mlops-mini-project.mlflow"
         )
 
-        save_reports(
-            scores_df=scores_df,
-            classification_report_text=classification_report_text,
-            scores_path=scores_path,
-            classification_path=classification_path,
-            output_dir=output_dir,
-        )
+        logger.debug("DagsHub initialized successfully")
 
-        logger.info("Model-evaluation pipeline completed successfully")
+        mlflow.set_experiment("dvc-pipeline")
+
+        with mlflow.start_run() as run:
+            model = load_model(model_path=model_path)
+
+            x_test, y_test = load_data(
+                x_test_path=x_test_path,
+                y_test_path=y_test_path,
+            )
+
+            scores_df, classification_report_text = calculate_scores(
+                model=model,
+                x_test=x_test,
+                y_test=y_test,
+            )
+
+            save_reports(
+                scores_df=scores_df,
+                classification_report_text=classification_report_text,
+                scores_path=scores_path,
+                classification_path=classification_path,
+                output_dir=output_dir,
+            )
+
+            logger.debug("Logging evaluation metrics to MLflow")
+
+            for metric_name in scores_df.index:
+                metric_value = float(scores_df.loc[metric_name].iloc[0])
+                rounded_value = round(metric_value, 5)
+
+                mlflow.log_metric(metric_name, rounded_value)
+
+                logger.debug(
+                    "Logged MLflow metric: %s = %s",
+                    metric_name,
+                    rounded_value,
+                )
+
+            logger.info("Evaluation metrics logged successfully to MLflow")
+
+            logger.debug("Logging model parameters to MLflow")
+
+            if hasattr(model, "get_params"):
+                params = model.get_params()
+
+                for param_name, param_value in params.items():
+                    mlflow.log_param(param_name, param_value)
+
+                    logger.debug(
+                        "Logged MLflow parameter: %s = %s",
+                        param_name,
+                        param_value,
+                    )
+
+            logger.info("Model parameters logged successfully to MLflow")
+
+            model_name = "logistic_regression_model"
+
+            model_uri = log_model_to_mlflow(
+                model=model,
+                x_test=x_test,
+                model_name=model_name,
+            )
+
+            save_model_info(
+                run_id=run.info.run_id,
+                model_name=model_name,
+                model_uri=model_uri,
+                file_path=experiment_info_path,
+            )
+            logger.debug("Logging evaluation reports to MLflow")
+
+            mlflow.log_artifact(scores_path, artifact_path="reports")
+            mlflow.log_artifact(
+                classification_path,
+                artifact_path="reports",
+            )
+
+            logger.info("Evaluation reports logged successfully to MLflow")
+            logger.info("Model-evaluation pipeline completed successfully")
 
     except Exception:
         logger.exception("Model-evaluation pipeline failed")
@@ -292,20 +481,23 @@ if __name__ == "__main__":
 
     transformed_dir = home_dir / "data" / "transformed"
     reports_dir = home_dir / "reports" / "figures"
+    model_dir = home_dir / "model"
 
-    model_path = home_dir / "model" / "model.pkl"
+    model_path = model_dir / "model.pkl"
 
     x_test_path = transformed_dir / "x_test.csv"
     y_test_path = transformed_dir / "y_test.csv"
 
     scores_path = reports_dir / "scores.csv"
     classification_path = reports_dir / "classification.txt"
+    experiment_info_path = reports_dir / "experiment_info.json"
 
     logger.debug("Project home directory: %s", home_dir)
     logger.debug("Model path: %s", model_path)
     logger.debug("Test features path: %s", x_test_path)
     logger.debug("Test labels path: %s", y_test_path)
     logger.debug("Report output directory: %s", reports_dir)
+    logger.debug("Experiment info path: %s", experiment_info_path)
 
     try:
         main(
@@ -315,6 +507,7 @@ if __name__ == "__main__":
             scores_path=str(scores_path),
             classification_path=str(classification_path),
             output_dir=str(reports_dir),
+            experiment_info_path=str(experiment_info_path),
         )
 
         print("Model evaluation completed successfully")
