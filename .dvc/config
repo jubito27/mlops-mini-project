@@ -1,7 +1,6 @@
 [core]
     remote = myremote
 [cache]
-    dir = /home/abhishek27/.cache/dvc-mlops
     type = copy
 ['remote "myremote"']
     url = s3://mini-project-bucket-jubito27/
