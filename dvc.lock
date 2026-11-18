@@ -5,8 +5,8 @@ stages:
     deps:
     - path: src/data/data_ingestion.py
       hash: md5
-      md5: 294ea26d5c810d26a5793c827b74e7c3
-      size: 6705
+      md5: 8d8c13ffccd52cf32dbd4d095197638c
+      size: 6687
       isexec: true
     params:
       params.yaml:
@@ -74,7 +74,7 @@ stages:
     outs:
     - path: model
       hash: md5
-      md5: 8a16888dc1721979eda0d2ac2ca05d75.dir
+      md5: 1da4135587f3722ce7c852733573c7dd.dir
       size: 40729
       nfiles: 1
   model_evaluation:
@@ -82,7 +82,7 @@ stages:
     deps:
     - path: model
       hash: md5
-      md5: 8a16888dc1721979eda0d2ac2ca05d75.dir
+      md5: 1da4135587f3722ce7c852733573c7dd.dir
       size: 40729
       nfiles: 1
     - path: src/models/predict_model.py
@@ -98,7 +98,7 @@ stages:
     outs:
     - path: reports/figures/scores.csv
       hash: md5
-      md5: 32477c511938d07c186fd6a46d493024
+      md5: d935fb2ae5f2ada30fa4987846271263
       size: 159
       isexec: true
   model_registration:
@@ -106,7 +106,7 @@ stages:
     deps:
     - path: reports/figures/experiment_info.json
       hash: md5
-      md5: 0be8090036adb07710556d6f395594fb
+      md5: a386815f18d25b65e52f481cd77a8564
       size: 162
       isexec: true
     - path: src/models/register_model.py
