@@ -129,7 +129,6 @@ def encoding_columns(
         )
 
         label_encoder = LabelEncoder()
-
         logger.debug("Fitting label encoder on training sentiment labels")
         y_train = pd.Series(
             label_encoder.fit_transform(train["sentiment"]),
@@ -142,6 +141,8 @@ def encoding_columns(
             name="sentiment",
         )
 
+
+        logger.debug('Total classes encoded on label : %s' , label_encoder.classes_)
         logger.debug("Encoded label classes: %s", list(label_encoder.classes_))
         logger.info("Feature encoding completed successfully")
 

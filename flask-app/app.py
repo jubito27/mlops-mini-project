@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request ,  redirect , url_for
 import automac
 import mlflow
 import dagshub 
 import pickle
+import pandas as pd
 from mlflow import MlflowClient
 app = Flask(__name__)
 
@@ -29,26 +30,44 @@ vectorizer = pickle.load(open('model/vectorizer.pkl' , 'rb'))
 
 @app.route('/') 
 def home():
-    return render_template('index.html')
+    return render_template('index.html' , result = None)
+
 
 @app.route('/predict', methods=['GET', 'POST'])
 def predict():
-    if request.method == 'POST':
-        # getting the text
-        text = request.form.get('text', '')
+    # Opening /predict directly should return to the input page.
+    if request.method == 'GET':
+        return redirect(url_for('home'))
 
-        # cleaning the text
+    text = request.form.get('text', '').strip()
+
+    if not text:
+        return "Please enter some text before predicting.", 400
+
+    try:
+        # Use the same text-cleaning process used during training.
         cleaned_text = automac.text.transform(text)
 
-        # tranforming the text
-        tranformed_text = vectorizer.transform([cleaned_text])
-        result = model.predict(tranformed_text.toarray())
-        return f"Received text: {result}"
-    cleaned_text = automac.text.transform(text)
+        if not isinstance(cleaned_text, str) or not cleaned_text.strip():
+            return "No usable text remains after preprocessing.", 400
 
-    
-    
-    return cleaned_text
+        # Use the saved fitted vectorizer; do not fit it again here.
+        transformed_text = vectorizer.transform([cleaned_text])
+
+        # Preserve the vocabulary column names used during training.
+        feature = pd.DataFrame(
+            transformed_text.toarray(),
+            columns=vectorizer.get_feature_names_out(),
+        )
+
+        predictions = model.predict(feature)
+
+        # Display the prediction rather than the entire result array.
+        return render_template('index.html' , result=predictions[0])
+
+    except Exception:
+        app.logger.exception("Prediction failed")
+        return "Prediction failed. Check the server logs for details.", 500
 
 if __name__ == '__main__':
     app.run(debug=True)

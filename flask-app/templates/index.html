@@ -12,5 +12,13 @@
         <textarea name="text" id="text" cols="50" rows="10"></textarea><br><br>
         <input type="submit" value="predict">
     </form>
+
+    {% if result is not none %}
+        {% if result == 1 %}
+            <h2>Sad ☹️</h2>
+        {% else %}
+            <h2>Happy ☺️</h2>
+        {% endif %}
+    {% endif %}
 </body>
 </html>
