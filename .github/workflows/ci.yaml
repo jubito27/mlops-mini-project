@@ -19,6 +19,15 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: run pipeline
-        run: |
-          dvc repro
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Pull data from S3
+        run: dvc pull data/external/tweets_emotions.csv.dvc
+
+      - name: Run DVC pipeline
+        run: dvc repro
