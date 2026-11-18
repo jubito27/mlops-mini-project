@@ -179,6 +179,7 @@ if __name__ == "__main__":
     train_path = output_dir / "train.csv"
     test_path = output_dir / "test.csv"
     yaml_path = home_dir / "params.yaml"
+    data_path = home_dir / "data" / "external" / "tweets_emotions.csv"
 
     logger.debug("Project home directory: %s", home_dir)
     logger.debug("YAML configuration path: %s", yaml_path)
@@ -190,7 +191,6 @@ if __name__ == "__main__":
         logger.debug("Loaded YAML configuration: %s", params)
 
         test_size = params["data_ingestion"]["test_size"]
-        data_path = "/mnt/WindowsD/Artificial Intelligence/Datasets/tweets_emotions.csv"
 
         main(
             data_path=str(data_path),
