@@ -1,93 +1,96 @@
-# load test + signature test + performance test
+"""Tests for the model produced by this repository's DVC pipeline.
 
-import unittest
-import mlflow
-import os
-import pandas as pd
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+These tests intentionally use the local model and transformed holdout data
+created by the current pipeline. They do not depend on an unrelated
+DagsHub repository or a vectorizer artifact that this project does not build.
+"""
+
 import pickle
+import unittest
+from pathlib import Path
+
+import pandas as pd
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class TestModelLoading(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
-        # Set up DagsHub credentials for MLflow tracking
-        dagshub_token = os.getenv("DAGSHUB_PAT")
-        if not dagshub_token:
-            raise EnvironmentError("DAGSHUB_PAT environment variable is not set")
+        model_path = ROOT / "model" / "model.pkl"
+        x_test_path = ROOT / "data" / "transformed" / "x_test.csv"
+        y_test_path = ROOT / "data" / "transformed" / "y_test.csv"
 
-        os.environ["MLFLOW_TRACKING_USERNAME"] = dagshub_token
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
+        for path in (model_path, x_test_path, y_test_path):
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"Required DVC pipeline artifact is missing: {path}"
+                )
 
-        dagshub_url = "https://dagshub.com"
-        repo_owner = "campusx-official"
-        repo_name = "mlops-project-2"
+        with model_path.open("rb") as model_file:
+            cls.model = pickle.load(model_file)
 
-        # Set up MLflow tracking URI
-        mlflow.set_tracking_uri(f'{dagshub_url}/{repo_owner}/{repo_name}.mlflow')
+        cls.x_test = pd.read_csv(x_test_path)
+        y_test_frame = pd.read_csv(y_test_path)
 
-        # Load the new model from MLflow model registry
-        cls.new_model_name = "my_model"
-        cls.new_model_version = cls.get_latest_model_version(cls.new_model_name)
-        cls.new_model_uri = f'models:/{cls.new_model_name}/{cls.new_model_version}'
-        cls.new_model = mlflow.pyfunc.load_model(cls.new_model_uri)
+        if y_test_frame.shape[1] != 1:
+            raise ValueError(
+                "Expected y_test.csv to contain exactly one target column; "
+                f"found {y_test_frame.shape[1]} columns."
+            )
 
-        # Load the vectorizer
-        cls.vectorizer = pickle.load(open('models/vectorizer.pkl', 'rb'))
+        cls.y_test = y_test_frame.iloc[:, 0]
 
-        # Load holdout test data
-        cls.holdout_data = pd.read_csv('data/processed/test_bow.csv')
+        if cls.x_test.empty or cls.y_test.empty:
+            raise ValueError("The transformed holdout test data is empty.")
 
-    @staticmethod
-    def get_latest_model_version(model_name, stage="Staging"):
-        client = mlflow.MlflowClient()
-        latest_version = client.get_latest_versions(model_name, stages=[stage])
-        return latest_version[0].version if latest_version else None
+        if len(cls.x_test) != len(cls.y_test):
+            raise ValueError(
+                "Feature/target row counts differ: "
+                f"{len(cls.x_test)} != {len(cls.y_test)}"
+            )
 
     def test_model_loaded_properly(self):
-        self.assertIsNotNone(self.new_model)
+        self.assertIsNotNone(self.model)
+        self.assertTrue(callable(getattr(self.model, "predict", None)))
 
-    def test_model_signature(self):
-        # Create a dummy input for the model based on expected input shape
-        input_text = "hi how are you"
-        input_data = self.vectorizer.transform([input_text])
-        input_df = pd.DataFrame(input_data.toarray(), columns=[str(i) for i in range(input_data.shape[1])])
+    def test_model_input_signature(self):
+        expected_features = getattr(self.model, "n_features_in_", None)
+        self.assertIsNotNone(
+            expected_features,
+            "The trained model does not expose n_features_in_.",
+        )
+        self.assertEqual(
+            self.x_test.shape[1],
+            expected_features,
+            "Holdout feature count does not match the trained model.",
+        )
 
-        # Predict using the new model to verify the input and output shapes
-        prediction = self.new_model.predict(input_df)
-
-        # Verify the input shape
-        self.assertEqual(input_df.shape[1], len(self.vectorizer.get_feature_names_out()))
-
-        # Verify the output shape (assuming binary classification with a single output)
-        self.assertEqual(len(prediction), input_df.shape[0])
-        self.assertEqual(len(prediction.shape), 1)  # Assuming a single output column for binary classification
+        predictions = self.model.predict(self.x_test)
+        self.assertEqual(len(predictions), len(self.x_test))
 
     def test_model_performance(self):
-        # Extract features and labels from holdout test data
-        X_holdout = self.holdout_data.iloc[:,0:-1]
-        y_holdout = self.holdout_data.iloc[:,-1]
+        predictions = self.model.predict(self.x_test)
 
-        # Predict using the new model
-        y_pred_new = self.new_model.predict(X_holdout)
+        accuracy = accuracy_score(self.y_test, predictions)
+        precision = precision_score(
+            self.y_test, predictions, average="macro", zero_division=0
+        )
+        recall = recall_score(
+            self.y_test, predictions, average="macro", zero_division=0
+        )
+        f1 = f1_score(
+            self.y_test, predictions, average="macro", zero_division=0
+        )
 
-        # Calculate performance metrics for the new model
-        accuracy_new = accuracy_score(y_holdout, y_pred_new)
-        precision_new = precision_score(y_holdout, y_pred_new)
-        recall_new = recall_score(y_holdout, y_pred_new)
-        f1_new = f1_score(y_holdout, y_pred_new)
+        minimum_score = 0.40
+        self.assertGreaterEqual(accuracy, minimum_score)
+        self.assertGreaterEqual(precision, minimum_score)
+        self.assertGreaterEqual(recall, minimum_score)
+        self.assertGreaterEqual(f1, minimum_score)
 
-        # Define expected thresholds for the performance metrics
-        expected_accuracy = 0.40
-        expected_precision = 0.40
-        expected_recall = 0.40
-        expected_f1 = 0.40
-
-        # Assert that the new model meets the performance thresholds
-        self.assertGreaterEqual(accuracy_new, expected_accuracy, f'Accuracy should be at least {expected_accuracy}')
-        self.assertGreaterEqual(precision_new, expected_precision, f'Precision should be at least {expected_precision}')
-        self.assertGreaterEqual(recall_new, expected_recall, f'Recall should be at least {expected_recall}')
-        self.assertGreaterEqual(f1_new, expected_f1, f'F1 score should be at least {expected_f1}')
 
 if __name__ == "__main__":
     unittest.main()
