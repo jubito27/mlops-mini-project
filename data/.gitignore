@@ -1,1 +1,6 @@
 /transformed
+
+# DVC-managed pipeline outputs
+/raw/
+/processed/
+/transformed/
