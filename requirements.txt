@@ -14,3 +14,4 @@ dvc-studio-client==0.23.0
 dvc-task==0.40.2
 nltk==3.10.3
 dagshub==0.7.3
+mlflow
