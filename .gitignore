@@ -90,3 +90,8 @@ target/
 model
 reports
 important.txt
+
+# DVC-managed pipeline outputs - do not commit generated data
+data/raw/
+data/processed/
+data/transformed/
