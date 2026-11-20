@@ -62,7 +62,7 @@ jobs:
 
       - name: Log in to Docker hub
         if: success()
-        uses: Docker/login-activity@v4
+        uses: Docker/login-action@v4
         with:
             username: ${{ secrets.DOCKERHUB_USERNAME }}
             password: ${{ secrets.DOCKERHUB_PAT }}
