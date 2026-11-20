@@ -59,3 +59,21 @@ jobs:
         env:
           DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
         run: python -m unittest tests/test_flask_app.py
+
+      - name: Log ion to DOcker hub
+        if: success()
+        uses: DOcker/login-activity@latest
+        with:
+            username: ${{ secrets.DOCKERHUB_USERNAME }}
+            password: ${{ secrets.DOCKERHUB_PAT }}
+
+      - name: Build Docker Image
+        if: success()
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest .
+
+      - name: push docker image to docker hub
+        if: success()
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
+          

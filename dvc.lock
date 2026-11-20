@@ -46,8 +46,8 @@ stages:
       nfiles: 2
     - path: src/data/feature_engineering.py
       hash: md5
-      md5: 9eec71319ec51c6518e3053995bd39b4
-      size: 9987
+      md5: 0a29648109ac5d64bc53f18e5341bbfa
+      size: 9993
       isexec: true
     params:
       params.yaml:
@@ -87,8 +87,8 @@ stages:
       nfiles: 1
     - path: src/models/predict_model.py
       hash: md5
-      md5: 307b93d466bc21b8c4651459f618ce29
-      size: 15753
+      md5: defc3d3a3aea7441e65b2e8ad8e36c3d
+      size: 16269
       isexec: true
     params:
       params.yaml:
@@ -106,11 +106,11 @@ stages:
     deps:
     - path: reports/figures/experiment_info.json
       hash: md5
-      md5: a386815f18d25b65e52f481cd77a8564
+      md5: 004207299f05db57d968f384a43b0582
       size: 162
       isexec: true
     - path: src/models/register_model.py
       hash: md5
-      md5: fc81b30250b63d147314eacea0100806
-      size: 4298
+      md5: ad6ede672890eaf3f0d3f5b5d9ad2e02
+      size: 4898
       isexec: true

@@ -102,9 +102,9 @@ def encoding_columns(
         raise ValueError(f"Invalid max_features value: {max_features}. It must be greater than 0.")
 
     logger.debug("Tracking start of param max_features")
-    with Live(save_dvc_exp=True) as live:
-        live.log_param('max_features' , max_features)
-    logger.debug('DVC Tracking Completed')
+    # with Live(save_dvc_exp=True) as live:
+    #     live.log_param('max_features' , max_features)
+    # logger.debug('DVC Tracking Completed')
 
 
     try:
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     y_test_path = transformed_dir / "y_test.csv"
 
     yaml_path = home_dir / "params.yaml"
-    cv_path = transformed_dir / "vectorizer.pkl"
+    cv_path = home_dir / "model" / "vectorizer.pkl"
 
     logger.debug("Project home directory: %s", home_dir)
     logger.debug("YAML configuration path: %s", yaml_path)

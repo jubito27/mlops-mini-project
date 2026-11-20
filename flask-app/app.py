@@ -46,11 +46,11 @@ def load_production_model():
 
 # Load artifacts once when the application starts.
 model = load_production_model()
-vectorizer_path = ROOT / "data" / "transformed" / "vectorizer.pkl"
+vectorizer_path = ROOT / "model" / "vectorizer.pkl"
 if not vectorizer_path.is_file():
     raise FileNotFoundError(
         f"Vectorizer artifact not found at {vectorizer_path}. "
-        "Run the DVC feature-engineering stage first; it stores this file under data/transformed/."
+        "Run the DVC feature-engineering stage first; it stores this file under model/."
     )
 
 with vectorizer_path.open("rb") as vectorizer_file:
@@ -90,4 +90,4 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)
