@@ -270,7 +270,7 @@ if __name__ == "__main__":
     y_test_path = transformed_dir / "y_test.csv"
 
     yaml_path = home_dir / "params.yaml"
-    cv_path = home_dir / "model" / "vectorizer.pkl"
+    cv_path = transformed_dir / "vectorizer.pkl"
 
     logger.debug("Project home directory: %s", home_dir)
     logger.debug("YAML configuration path: %s", yaml_path)
