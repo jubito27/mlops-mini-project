@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get update \
     && apt-get install -y --no-install-recommends libgomp1
 
-WORKDIR app
+WORKDIR /app
 
 COPY flask-app/requirements.txt app/requirements.txt
 
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY flask-app/ app/
 
-COPY model/vectorizer.pkl model/vectorizer.pkl
+COPY data/transformed/vectorizer.pkl data/transformed/vectorizer.pkl
 
 EXPOSE 5000
 
