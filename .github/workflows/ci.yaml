@@ -60,35 +60,50 @@ jobs:
           DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
         run: python -m unittest tests/test_flask_app.py
 
-      - name: Log in to Docker hub
-        if: success()
-        uses: Docker/login-action@v4
-        with:
-            username: ${{ secrets.DOCKERHUB_USERNAME }}
-            password: ${{ secrets.DOCKERHUB_PAT }}
-
-      - name: Build Docker Image
+      - name: Login to AWS ECR
         if: success()
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest .
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com
 
-      - name: push docker image to docker hub
+      - name: Build Docker image
         if: success()
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
+          docker build -t jubito27_ecr .
 
-      - name: Deploy to ec2
+      - name: Tag Docker image
         if: success()
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            echo "${{ secrets.DOCKERHUB_PAT }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
-            docker stop my-app || true
-            docker rm my-app || true
-            docker run -d -p 80:5000 --name my-app --restart unless-stopped \
-              -e DAGSHUB_PAT=${{ secrets.DAGSHUB_PAT }} \
-              ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
+        run: |
+          docker tag jubito27_ecr:latest 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
+
+      - name: Push Docker image to AWS ECR
+        if: success()
+        run: |
+          docker push 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
+
+      # Zip the required files
+      - name: Zip files for deployment
+        if: success()
+        run: |
+          zip -r deployment.zip appspec.yml deploy/scripts/install_dependencies.sh deploy/scripts/start_docker.sh
+
+      # Upload the ZIP file to S3
+      - name: Upload ZIP to S3
+        if: success()
+        run: |
+          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip
+
+      # Deploy to AWS CodeDeploy using the uploaded ZIP file
+      - name: Deploy to AWS CodeDeploy
+        if: success()
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws deploy create-deployment \
+            --application-name MyDockerApp2 \
+            --deployment-config-name CodeDeployDefault.OneAtATime \
+            --deployment-group-name MyDockerAppASGDeploymentGroup \
+            --s3-location bucket=campusxcodedeploybucket,key=deployment.zip,bundleType=zip \
+            --file-exists-behavior OVERWRITE \
+            --region ap-southeast-2
