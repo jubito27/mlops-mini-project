@@ -82,28 +82,26 @@ jobs:
         run: |
           docker push 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
 
-      # Zip the required files
+      # Package only the CodeDeploy manifest and lifecycle scripts.
       - name: Zip files for deployment
         if: success()
         run: |
-          zip -r deployment.zip appspec.yml deploy/scripts/install_dependencies.sh deploy/scripts/start_docker.sh
+          zip -r deployment.zip appspec.yml deploy/scripts
 
-      # Upload the ZIP file to S3
+      # Upload the same bundle to the bucket used by CodeDeploy.
       - name: Upload ZIP to S3
         if: success()
         run: |
-          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip
+          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-southeast-2
 
-      # Deploy to AWS CodeDeploy using the uploaded ZIP file
+      # Deploy the uploaded bundle through CodeDeploy.
       - name: Deploy to AWS CodeDeploy
         if: success()
         run: |
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws deploy create-deployment \
             --application-name MyDockerApp2 \
             --deployment-config-name CodeDeployDefault.OneAtATime \
             --deployment-group-name MyDockerAppASGDeploymentGroup \
-            --s3-location bucket=campusxcodedeploybucket,key=deployment.zip,bundleType=zip \
+            --s3-location bucket=mini-project-bucket-jubito27,key=deployment.zip,bundleType=zip \
             --file-exists-behavior OVERWRITE \
             --region ap-southeast-2
