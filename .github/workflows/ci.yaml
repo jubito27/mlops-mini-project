@@ -108,9 +108,9 @@ jobs:
         if: success()
         run: |
           aws deploy create-deployment \
-            --application-name MyDockerApp2 \
+            --application-name sentiment-detector \
             --deployment-config-name CodeDeployDefault.OneAtATime \
-            --deployment-group-name MyDockerAppASGDeploymentGroup \
+            --deployment-group-name sentiment-detector-deployment-group \
             --s3-location bucket=mini-project-bucket-jubito27,key=deployment.zip,bundleType=zip \
             --file-exists-behavior OVERWRITE \
             --region ap-south-1
