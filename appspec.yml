@@ -1,0 +1,22 @@
+version: 0.0
+os: linux
+files:
+  - source: deploy/scripts/
+    destination: /opt/mlops-mini-project/scripts
+permissions:
+  - object: /opt/mlops-mini-project/scripts
+    pattern: "*.sh"
+    owner: root
+    group: root
+    mode: 755
+    type:
+      - file
+hooks:
+  BeforeInstall:
+    - location: deploy/scripts/install_dependencies.sh
+      timeout: 600
+      runas: root
+  ApplicationStart:
+    - location: deploy/scripts/start_docker.sh
+      timeout: 600
+      runas: root
