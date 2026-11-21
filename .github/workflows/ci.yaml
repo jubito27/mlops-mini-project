@@ -1,6 +1,8 @@
 name: CI Pipeline
 
-on: push
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   project-testing:
@@ -19,9 +21,17 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'flask-app/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
+
+      - name: Cache DVC artifacts
+        uses: actions/cache@v4
+        with:
+          path: .dvc/cache
+          key: ${{ runner.os }}-dvc-${{ hashFiles('dvc.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dvc-
 
       - name: intall dependencies
         run: |
@@ -67,20 +77,19 @@ jobs:
           aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com
 
-      - name: Build Docker image
+      - name: Set up Docker Buildx
         if: success()
-        run: |
-          docker build -t jubito27_ecr .
+        uses: docker/setup-buildx-action@v3
 
-      - name: Tag Docker image
+      - name: Build and push Docker image (with layer cache)
         if: success()
-        run: |
-          docker tag jubito27_ecr:latest 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
-
-      - name: Push Docker image to AWS ECR
-        if: success()
-        run: |
-          docker push 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com/jubito27_ecr:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # Package only the CodeDeploy manifest and lifecycle scripts.
       - name: Zip files for deployment
@@ -92,7 +101,7 @@ jobs:
       - name: Upload ZIP to S3
         if: success()
         run: |
-          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-southeast-2
+          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-south-1
 
       # Deploy the uploaded bundle through CodeDeploy.
       - name: Deploy to AWS CodeDeploy
@@ -104,4 +113,4 @@ jobs:
             --deployment-group-name MyDockerAppASGDeploymentGroup \
             --s3-location bucket=mini-project-bucket-jubito27,key=deployment.zip,bundleType=zip \
             --file-exists-behavior OVERWRITE \
-            --region ap-southeast-2
+            --region ap-south-1
