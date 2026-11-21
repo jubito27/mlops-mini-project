@@ -85,10 +85,10 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
-            docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/sentiment-2:latest
+            echo "${{ secrets.DOCKERHUB_PAT }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
             docker stop my-app || true
             docker rm my-app || true
             docker run -d -p 80:5000 --name my-app --restart unless-stopped \
               -e DAGSHUB_PAT=${{ secrets.DAGSHUB_PAT }} \
-              ${{ secrets.DOCKER_HUB_USERNAME }}/sentiment-2:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/sentiment-2:latest
