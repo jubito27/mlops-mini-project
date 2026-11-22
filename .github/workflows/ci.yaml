@@ -4,26 +4,26 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   project-testing:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - name: checkout code
-        uses: actions/checkout@v3
-           
-      - name: setup python
-        uses: actions/setup-python@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'flask-app/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            flask-app/requirements.txt
 
       - name: Cache DVC artifacts
         uses: actions/cache@v4
@@ -33,8 +33,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dvc-
 
-      - name: intall dependencies
+      - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Configure AWS Credentials
@@ -42,7 +43,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+          aws-region: ap-southeast-2
 
       - name: Pull data from S3
         run: dvc pull data/external/tweets_emotions.csv.dvc
@@ -55,8 +56,7 @@ jobs:
       - name: Run model tests
         env:
           DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
-        run: |
-          python -m unittest tests/test_model.py
+        run: python -m unittest tests/test_model.py
 
       - name: Promote model to production
         if: success()
@@ -73,9 +73,8 @@ jobs:
       - name: Login to AWS ECR
         if: success()
         run: |
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com
+          aws ecr get-login-password --region ap-southeast-2 \
+            | docker login --username AWS --password-stdin 970734043001.dkr.ecr.ap-southeast-2.amazonaws.com
 
       - name: Set up Docker Buildx
         if: success()
@@ -91,26 +90,134 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Package only the CodeDeploy manifest and lifecycle scripts.
-      - name: Zip files for deployment
+      - name: Package CodeDeploy revision
         if: success()
-        run: |
-          zip -r deployment.zip appspec.yml deploy/scripts
+        run: zip -r deployment.zip appspec.yml deploy/scripts
 
-      # Upload the same bundle to the bucket used by CodeDeploy.
-      - name: Upload ZIP to S3
+      - name: Upload revision to the CodeDeploy-region S3 bucket
         if: success()
         run: |
-          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-south-1
+          aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-southeast-2
 
-      # Deploy the uploaded bundle through CodeDeploy.
-      - name: Deploy to AWS CodeDeploy
+      # The ASG is deliberately refreshed with launch-template v3. Do not submit a
+      # deployment until every desired instance runs v3 and its SSM agent is online.
+      - name: Wait for EC2 bootstrap and instance refresh
         if: success()
+        shell: bash
         run: |
-          aws deploy create-deployment \
+          set -Eeuo pipefail
+          ASG_NAME="sentiment-detector-scaling-group"
+          EXPECTED_LT_VERSION="3"
+          READY="false"
+
+          for attempt in $(seq 1 90); do
+            ASG_JSON="$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" --output json)"
+            DESIRED="$(jq -r '.AutoScalingGroups[0].DesiredCapacity' <<< "$ASG_JSON")"
+            INSTANCE_COUNT="$(jq -r '.AutoScalingGroups[0].Instances | length' <<< "$ASG_JSON")"
+            BAD_INSTANCES="$(jq -r --arg version "$EXPECTED_LT_VERSION" '
+              .AutoScalingGroups[0].Instances[]
+              | select(.LaunchTemplate.Version != $version
+                       or .LifecycleState != "InService"
+                       or .HealthStatus != "Healthy")
+              | .InstanceId
+            ' <<< "$ASG_JSON")"
+
+            REFRESH_STATUS="$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" --max-records 1 \
+              --query 'InstanceRefreshes[0].Status' --output text)"
+
+            if [[ "$REFRESH_STATUS" == "Failed" || "$REFRESH_STATUS" == "Cancelled" \
+               || "$REFRESH_STATUS" == "RollbackSuccessful" || "$REFRESH_STATUS" == "RollbackFailed" ]]; then
+              echo "EC2 instance refresh ended with status: $REFRESH_STATUS" >&2
+              aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG_NAME" --max-records 1
+              exit 1
+            fi
+
+            if [[ "$INSTANCE_COUNT" -eq "$DESIRED" && -z "$BAD_INSTANCES" \
+               && "$REFRESH_STATUS" == "Successful" ]]; then
+              INSTANCE_IDS="$(jq -r '.AutoScalingGroups[0].Instances[].InstanceId' <<< "$ASG_JSON")"
+              ONLINE_IDS="$(aws ssm describe-instance-information \
+                --query 'InstanceInformationList[?PingStatus==`Online`].InstanceId' --output text)"
+              SSM_OK="true"
+              for instance_id in $INSTANCE_IDS; do
+                if [[ " $ONLINE_IDS " != *" $instance_id "* ]]; then
+                  SSM_OK="false"
+                  echo "Waiting for SSM agent on $instance_id"
+                fi
+              done
+              if [[ "$SSM_OK" == "true" ]]; then
+                READY="true"
+                break
+              fi
+            else
+              echo "Waiting: refresh=$REFRESH_STATUS, instances=$INSTANCE_COUNT/$DESIRED, outdated/unhealthy=$BAD_INSTANCES"
+            fi
+            sleep 20
+          done
+
+          if [[ "$READY" != "true" ]]; then
+            echo "EC2 fleet did not complete launch-template v3 bootstrap within 30 minutes." >&2
+            aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME"
+            aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG_NAME" --max-records 3
+            exit 1
+          fi
+
+      - name: Create CodeDeploy deployment
+        if: success()
+        id: codedeploy
+        run: |
+          DEPLOYMENT_ID="$(aws deploy create-deployment \
             --application-name sentiment-detector \
             --deployment-config-name CodeDeployDefault.OneAtATime \
             --deployment-group-name sentiment-detector-deployment-group \
             --s3-location bucket=mini-project-bucket-jubito27,key=deployment.zip,bundleType=zip \
             --file-exists-behavior OVERWRITE \
+            --region ap-southeast-2 \
+            --query deploymentId --output text)"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "Created CodeDeploy deployment: $DEPLOYMENT_ID"
+
+      - name: Wait for CodeDeploy deployment to succeed
+        if: success()
+        env:
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment_id }}
+        run: |
+          if ! aws deploy wait deployment-successful \
+            --deployment-id "$DEPLOYMENT_ID" --region ap-southeast-2; then
+            echo "CodeDeploy deployment failed. AWS diagnostics:"
+            aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+              --region ap-southeast-2 \
+              --query 'deploymentInfo.{status:status,error:errorInformation,overview:deploymentOverview}' \
+              --output json || true
+            exit 1
+          fi
+
+      - name: Wait for all ALB targets to become healthy
+        if: success()
+        run: |
+          TARGET_GROUP_ARN="arn:aws:elasticloadbalancing:ap-southeast-2:970734043001:targetgroup/sentiment-scaling-group-1/9a96095d1074b562"
+          for attempt in $(seq 1 60); do
+            DESIRED="$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names sentiment-detector-scaling-group \
+              --query 'AutoScalingGroups[0].DesiredCapacity' --output text)"
+            HEALTHY="$(aws elbv2 describe-target-health --target-group-arn "$TARGET_GROUP_ARN" \
+              --query 'length(TargetHealthDescriptions[?TargetHealth.State==`healthy`])' --output text)"
+            echo "Healthy ALB targets: $HEALTHY / $DESIRED"
+            if [[ "$HEALTHY" -ge "$DESIRED" ]]; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Not all EC2 targets became healthy in the ALB target group." >&2
+          aws elbv2 describe-target-health --target-group-arn "$TARGET_GROUP_ARN"
+          exit 1
+
+      - name: Enable ELB health checks after successful deployment
+        if: success()
+        run: |
+          aws autoscaling update-auto-scaling-group \
+            --auto-scaling-group-name sentiment-detector-scaling-group \
+            --health-check-type ELB \
+            --health-check-grace-period 900 \
             --region ap-southeast-2
