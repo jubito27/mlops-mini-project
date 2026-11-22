@@ -103,15 +103,15 @@ jobs:
         run: |
           aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-southeast-2
 
-      # The ASG is deliberately refreshed with launch-template v5. Do not submit a
-      # deployment until every desired instance runs v3 and its SSM agent is online.
-      - name: Wait for EC2 bootstrap and instance refresh
+      # The active Auto Scaling Group uses launch-template version 6.
+      # Wait until every desired node is refreshed, online in SSM, and running CodeDeploy agent 2.x.
+      - name: Wait for EC2 bootstrap and CodeDeploy agent readiness
         if: success()
         shell: bash
         run: |
           set -Eeuo pipefail
           ASG_NAME="sentiment-detector-scaling-group"
-          EXPECTED_LT_VERSION="5"
+          EXPECTED_LT_VERSION="6"
           READY="false"
 
           for attempt in $(seq 1 180); do
@@ -139,20 +139,57 @@ jobs:
             fi
 
             if [[ "$INSTANCE_COUNT" -eq "$DESIRED" && -z "$BAD_INSTANCES" \
-               && "$REFRESH_STATUS" == "Successful" ]]; then
-              INSTANCE_IDS="$(jq -r '.AutoScalingGroups[0].Instances[].InstanceId' <<< "$ASG_JSON")"
+               && ( "$REFRESH_STATUS" == "Successful" || "$REFRESH_STATUS" == "None" ) ]]; then
+              mapfile -t INSTANCE_ID_ARRAY < <(jq -r '.AutoScalingGroups[0].Instances[].InstanceId' <<< "$ASG_JSON")
               ONLINE_IDS="$(aws ssm describe-instance-information \
                 --query 'InstanceInformationList[?PingStatus==`Online`].InstanceId' --output text)"
               SSM_OK="true"
-              for instance_id in $INSTANCE_IDS; do
+              for instance_id in "${INSTANCE_ID_ARRAY[@]}"; do
                 if [[ " $ONLINE_IDS " != *" $instance_id "* ]]; then
                   SSM_OK="false"
                   echo "Waiting for SSM agent on $instance_id"
                 fi
               done
+
               if [[ "$SSM_OK" == "true" ]]; then
-                READY="true"
-                break
+                AGENT_COMMAND_ID="$(aws ssm send-command \
+                  --instance-ids "${INSTANCE_ID_ARRAY[@]}" \
+                  --document-name AWS-RunShellScript \
+                  --timeout-seconds 60 \
+                  --parameters '{"commands":["systemctl is-active --quiet codedeploy-agent && /opt/codedeploy-agent/bin/codedeploy-agent --version | grep -Eq \"^codedeploy-agent 2\\.\""]}' \
+                  --comment "Verify CodeDeploy agent 2.x before deployment" \
+                  --query 'Command.CommandId' --output text)"
+
+                AGENTS_OK="true"
+                for instance_id in "${INSTANCE_ID_ARRAY[@]}"; do
+                  COMMAND_STATUS="Pending"
+                  for command_try in $(seq 1 30); do
+                    COMMAND_STATUS="$(aws ssm get-command-invocation \
+                      --command-id "$AGENT_COMMAND_ID" --instance-id "$instance_id" \
+                      --query Status --output text 2>/dev/null || echo Pending)"
+                    if [[ "$COMMAND_STATUS" == "Success" ]]; then
+                      echo "CodeDeploy agent 2.x is active on $instance_id"
+                      break
+                    fi
+                    if [[ "$COMMAND_STATUS" == "Failed" || "$COMMAND_STATUS" == "TimedOut" \
+                       || "$COMMAND_STATUS" == "Cancelled" ]]; then
+                      aws ssm get-command-invocation \
+                        --command-id "$AGENT_COMMAND_ID" --instance-id "$instance_id" --output json || true
+                      AGENTS_OK="false"
+                      break
+                    fi
+                    sleep 2
+                  done
+                  if [[ "$COMMAND_STATUS" != "Success" ]]; then
+                    AGENTS_OK="false"
+                    echo "CodeDeploy agent is not ready on $instance_id (status=$COMMAND_STATUS)"
+                  fi
+                done
+
+                if [[ "$AGENTS_OK" == "true" ]]; then
+                  READY="true"
+                  break
+                fi
               fi
             else
               echo "Waiting: refresh=$REFRESH_STATUS, instances=$INSTANCE_COUNT/$DESIRED, outdated/unhealthy=$BAD_INSTANCES"
@@ -161,7 +198,7 @@ jobs:
           done
 
           if [[ "$READY" != "true" ]]; then
-            echo "EC2 fleet did not complete launch-template v5 bootstrap within 60 minutes." >&2
+            echo "EC2 fleet did not complete launch-template v6 bootstrap within 60 minutes." >&2
             aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME"
             aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG_NAME" --max-records 3
             exit 1
