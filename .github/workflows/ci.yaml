@@ -49,6 +49,20 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-southeast-2
 
+      - name: Store DagsHub runtime token in SSM Parameter Store
+        if: success()
+        env:
+          DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
+        run: |
+          test -n "$DAGSHUB_PAT"
+          aws ssm put-parameter \
+            --name "/sentiment-detector/DAGSHUB_PAT" \
+            --type SecureString \
+            --value "$DAGSHUB_PAT" \
+            --overwrite \
+            --region ap-southeast-2 >/dev/null
+
+
       - name: Pull data from S3
         run: dvc pull data/external/tweets_emotions.csv.dvc
 
