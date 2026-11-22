@@ -4,6 +4,10 @@ on:
   push:
   workflow_dispatch:
 
+concurrency:
+  group: sentiment-detector-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -99,7 +103,7 @@ jobs:
         run: |
           aws s3 cp deployment.zip s3://mini-project-bucket-jubito27/deployment.zip --region ap-southeast-2
 
-      # The ASG is deliberately refreshed with launch-template v3. Do not submit a
+      # The ASG is deliberately refreshed with launch-template v5. Do not submit a
       # deployment until every desired instance runs v3 and its SSM agent is online.
       - name: Wait for EC2 bootstrap and instance refresh
         if: success()
@@ -107,7 +111,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ASG_NAME="sentiment-detector-scaling-group"
-          EXPECTED_LT_VERSION="3"
+          EXPECTED_LT_VERSION="5"
           READY="false"
 
           for attempt in $(seq 1 90); do
@@ -157,7 +161,7 @@ jobs:
           done
 
           if [[ "$READY" != "true" ]]; then
-            echo "EC2 fleet did not complete launch-template v3 bootstrap within 30 minutes." >&2
+            echo "EC2 fleet did not complete launch-template v5 bootstrap within 30 minutes." >&2
             aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME"
             aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG_NAME" --max-records 3
             exit 1
