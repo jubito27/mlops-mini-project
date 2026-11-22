@@ -114,7 +114,7 @@ jobs:
           EXPECTED_LT_VERSION="5"
           READY="false"
 
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 180); do
             ASG_JSON="$(aws autoscaling describe-auto-scaling-groups \
               --auto-scaling-group-names "$ASG_NAME" --output json)"
             DESIRED="$(jq -r '.AutoScalingGroups[0].DesiredCapacity' <<< "$ASG_JSON")"
@@ -161,7 +161,7 @@ jobs:
           done
 
           if [[ "$READY" != "true" ]]; then
-            echo "EC2 fleet did not complete launch-template v5 bootstrap within 30 minutes." >&2
+            echo "EC2 fleet did not complete launch-template v5 bootstrap within 60 minutes." >&2
             aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME"
             aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG_NAME" --max-records 3
             exit 1
