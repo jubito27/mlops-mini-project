@@ -47,7 +47,7 @@ docker run "${RUN_ARGS[@]}" "$IMAGE_URI"
 
 # Wait for Flask itself to answer, not merely for the container process to exist.
 for attempt in {1..60}; do
-  if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:5000/ >/dev/null; then
+  if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:80/ >/dev/null; then
     echo "Application health check passed on attempt $attempt."
     exit 0
   fi
@@ -55,5 +55,5 @@ for attempt in {1..60}; do
 done
 
 docker logs "$CONTAINER_NAME" || true
-echo "Application did not return HTTP 200 from http://127.0.0.1:5000/." >&2
+echo "Application did not return HTTP 200 from host-mapped port 80 (container port 5000)." >&2
 exit 1
